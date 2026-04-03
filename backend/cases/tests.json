@@ -1,0 +1,5 @@
+{
+  "tests": [
+    {"name": "Get cases list", "method": "GET", "path": "/", "expectedStatus": 200, "expectedBody": {"cases": []}, "bodyMatcher": "partial"}
+  ]
+}

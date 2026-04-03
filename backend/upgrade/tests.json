@@ -1,0 +1,5 @@
+{
+  "tests": [
+    {"name": "Get skins list", "method": "GET", "path": "/", "expectedStatus": 200, "expectedBody": {"skins": []}, "bodyMatcher": "partial"}
+  ]
+}
