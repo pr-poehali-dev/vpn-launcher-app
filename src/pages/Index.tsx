@@ -20,7 +20,49 @@ const PROTOCOLS = [
 ];
 
 type Tab = "home" | "servers" | "settings";
-type FilterType = "all" | "fast" | "nearest";
+type FilterType = "all" | "fast" | "nearest" | "custom";
+
+interface Server {
+  id: number;
+  country: string;
+  city: string;
+  flag: string;
+  ping: number;
+  load: number;
+  speed: number;
+  url?: string;
+  custom?: boolean;
+}
+
+function parseServerUrl(url: string): Partial<Server> | null {
+  try {
+    const lower = url.toLowerCase().trim();
+    if (lower.startsWith("vmess://") || lower.startsWith("vless://")) {
+      const proto = lower.startsWith("vmess") ? "VMess" : "VLESS";
+      const decoded = atob(url.slice(lower.startsWith("vmess") ? 8 : 8));
+      const json = JSON.parse(decoded);
+      return { city: json.ps || json.add || proto, country: "Пользовательский", flag: "🌐" };
+    }
+    if (lower.startsWith("ss://")) {
+      const rest = url.slice(5);
+      const atIdx = rest.lastIndexOf("@");
+      const label = rest.includes("#") ? decodeURIComponent(rest.split("#")[1]) : "Shadowsocks";
+      return { city: label, country: "Пользовательский", flag: "🌐" };
+    }
+    if (lower.startsWith("trojan://")) {
+      const rest = url.slice(9);
+      const label = rest.includes("#") ? decodeURIComponent(rest.split("#")[1]) : "Trojan";
+      return { city: label, country: "Пользовательский", flag: "🌐" };
+    }
+    if (lower.startsWith("wireguard://") || lower.startsWith("wg://")) {
+      return { city: "WireGuard", country: "Пользовательский", flag: "🌐" };
+    }
+    const parsed = new URL(url);
+    return { city: parsed.hostname, country: "Пользовательский", flag: "🌐" };
+  } catch {
+    return null;
+  }
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes.toFixed(0)} Б`;
@@ -57,7 +99,13 @@ export default function Index() {
   const [tab, setTab] = useState<Tab>("home");
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [activeServer, setActiveServer] = useState(SERVERS[0]);
+  const [activeServer, setActiveServer] = useState<Server>(SERVERS[0]);
+  const [customServers, setCustomServers] = useState<Server[]>([]);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addUrl, setAddUrl] = useState("");
+  const [addName, setAddName] = useState("");
+  const [addError, setAddError] = useState("");
+  const [addSuccess, setAddSuccess] = useState(false);
   const [protocol, setProtocol] = useState("wireguard");
   const [filter, setFilter] = useState<FilterType>("all");
   const [killSwitch, setKillSwitch] = useState(true);
@@ -125,11 +173,43 @@ export default function Index() {
     }, 2200);
   };
 
-  const filteredServers = SERVERS.filter((s) => {
+  const allServers: Server[] = [...SERVERS, ...customServers];
+
+  const filteredServers = allServers.filter((s) => {
+    if (filter === "custom") return !!s.custom;
     if (filter === "fast") return s.speed >= 85;
     if (filter === "nearest") return s.ping <= 30;
     return true;
   });
+
+  const handleAddServer = () => {
+    setAddError("");
+    const url = addUrl.trim();
+    if (!url) { setAddError("Введите URL сервера"); return; }
+    const parsed = parseServerUrl(url);
+    if (!parsed) { setAddError("Не удалось распознать формат. Поддерживается: vmess://, vless://, ss://, trojan://, wireguard://"); return; }
+    const newServer: Server = {
+      id: Date.now(),
+      country: parsed.country || "Пользовательский",
+      city: addName.trim() || parsed.city || "Мой сервер",
+      flag: parsed.flag || "🌐",
+      ping: Math.floor(Math.random() * 80) + 20,
+      load: Math.floor(Math.random() * 50) + 10,
+      speed: Math.floor(Math.random() * 30) + 65,
+      url,
+      custom: true,
+    };
+    setCustomServers((prev) => [...prev, newServer]);
+    setAddSuccess(true);
+    setTimeout(() => {
+      setAddSuccess(false);
+      setShowAddModal(false);
+      setAddUrl("");
+      setAddName("");
+      setFilter("custom");
+      setTab("servers");
+    }, 1200);
+  };
 
   const connectionColor = connected
     ? "var(--cloud-emerald)"
@@ -142,6 +222,131 @@ export default function Index() {
       className="min-h-screen text-white font-golos relative overflow-hidden"
       style={{ backgroundColor: "var(--cloud-bg)" }}
     >
+      {/* Add Server Modal */}
+      {showAddModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowAddModal(false); setAddError(""); setAddUrl(""); setAddName(""); } }}
+        >
+          <div
+            className="w-full max-w-md rounded-t-3xl p-6 pb-10"
+            style={{
+              background: "var(--cloud-surface)",
+              border: "1px solid var(--cloud-border)",
+              borderBottom: "none",
+              animation: "slide-up 0.35s ease-out both",
+            }}
+          >
+            {/* Handle */}
+            <div className="w-10 h-1 rounded-full mx-auto mb-5" style={{ background: "rgba(255,255,255,0.12)" }} />
+
+            <div className="flex items-center gap-3 mb-5">
+              <div
+                className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+                style={{ background: "linear-gradient(135deg, var(--cloud-cyan), var(--cloud-violet))", boxShadow: "0 0 20px rgba(0,229,255,0.25)" }}
+              >
+                <Icon name="Plus" size={20} className="text-gray-900" />
+              </div>
+              <div>
+                <div className="font-black text-lg" style={{ fontFamily: "Montserrat, sans-serif" }}>Добавить сервер</div>
+                <div className="text-xs text-gray-500">Вставьте URL конфигурации</div>
+              </div>
+            </div>
+
+            {/* Supported formats */}
+            <div
+              className="flex flex-wrap gap-1.5 mb-4"
+            >
+              {["vmess://", "vless://", "ss://", "trojan://", "wireguard://"].map((f) => (
+                <span
+                  key={f}
+                  className="text-xs px-2 py-0.5 rounded-lg font-mono"
+                  style={{ background: "rgba(139,92,246,0.12)", color: "var(--cloud-violet)", border: "1px solid rgba(139,92,246,0.2)" }}
+                >
+                  {f}
+                </span>
+              ))}
+            </div>
+
+            {/* URL input */}
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-400 mb-1.5 block">URL конфигурации *</label>
+                <textarea
+                  value={addUrl}
+                  onChange={(e) => { setAddUrl(e.target.value); setAddError(""); }}
+                  placeholder="vmess://eyJhZGQiOiIx..."
+                  rows={3}
+                  className="w-full rounded-xl px-4 py-3 text-sm font-mono resize-none outline-none transition-all duration-200"
+                  style={{
+                    background: "var(--cloud-surface2)",
+                    border: `1px solid ${addError ? "rgba(244,63,135,0.5)" : "rgba(0,229,255,0.12)"}`,
+                    color: "white",
+                    caretColor: "var(--cloud-cyan)",
+                  }}
+                  onFocus={(e) => { e.target.style.borderColor = "rgba(0,229,255,0.4)"; e.target.style.boxShadow = "0 0 16px rgba(0,229,255,0.08)"; }}
+                  onBlur={(e) => { e.target.style.borderColor = addError ? "rgba(244,63,135,0.5)" : "rgba(0,229,255,0.12)"; e.target.style.boxShadow = "none"; }}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-400 mb-1.5 block">Название (необязательно)</label>
+                <input
+                  value={addName}
+                  onChange={(e) => setAddName(e.target.value)}
+                  placeholder="Мой VPN сервер"
+                  className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-all duration-200"
+                  style={{
+                    background: "var(--cloud-surface2)",
+                    border: "1px solid rgba(0,229,255,0.12)",
+                    color: "white",
+                    caretColor: "var(--cloud-cyan)",
+                  }}
+                  onFocus={(e) => { e.target.style.borderColor = "rgba(0,229,255,0.4)"; e.target.style.boxShadow = "0 0 16px rgba(0,229,255,0.08)"; }}
+                  onBlur={(e) => { e.target.style.borderColor = "rgba(0,229,255,0.12)"; e.target.style.boxShadow = "none"; }}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddServer()}
+                />
+              </div>
+
+              {addError && (
+                <div
+                  className="flex items-start gap-2 px-3 py-2.5 rounded-xl text-xs"
+                  style={{ background: "rgba(244,63,135,0.08)", border: "1px solid rgba(244,63,135,0.2)", color: "var(--cloud-pink)" }}
+                >
+                  <Icon name="AlertCircle" size={13} className="shrink-0 mt-0.5" />
+                  {addError}
+                </div>
+              )}
+
+              {addSuccess && (
+                <div
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs"
+                  style={{ background: "rgba(16,245,160,0.08)", border: "1px solid rgba(16,245,160,0.2)", color: "var(--cloud-emerald)" }}
+                >
+                  <Icon name="CheckCircle" size={13} />
+                  Сервер добавлен успешно!
+                </div>
+              )}
+
+              <button
+                onClick={handleAddServer}
+                className="w-full rounded-xl py-3.5 font-black text-sm transition-all duration-200"
+                style={{
+                  background: "linear-gradient(135deg, var(--cloud-cyan), var(--cloud-violet))",
+                  color: "#000",
+                  boxShadow: "0 0 24px rgba(0,229,255,0.2)",
+                }}
+              >
+                <span className="flex items-center justify-center gap-2">
+                  <Icon name="Plus" size={16} />
+                  Добавить сервер
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Grid background */}
       <div
         className="fixed inset-0 pointer-events-none"
@@ -501,35 +706,74 @@ export default function Index() {
           {/* ===== SERVERS ===== */}
           {tab === "servers" && (
             <div className="space-y-4 entry-1">
-              <div>
-                <h2 className="text-xl font-black" style={{ fontFamily: "Montserrat, sans-serif" }}>
-                  VPN Серверы
-                </h2>
-                <p className="text-sm text-gray-500">{SERVERS.length} локаций по всему миру</p>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xl font-black" style={{ fontFamily: "Montserrat, sans-serif" }}>
+                    VPN Серверы
+                  </h2>
+                  <p className="text-sm text-gray-500">{allServers.length} локаций доступно</p>
+                </div>
+                <button
+                  onClick={() => { setShowAddModal(true); setAddError(""); setAddUrl(""); setAddName(""); }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200"
+                  style={{
+                    background: "linear-gradient(135deg, var(--cloud-cyan), var(--cloud-violet))",
+                    color: "#000",
+                    boxShadow: "0 0 18px rgba(0,229,255,0.2)",
+                  }}
+                >
+                  <Icon name="Plus" size={14} />
+                  Добавить
+                </button>
               </div>
 
               {/* Filter chips */}
-              <div className="flex gap-2">
-                {(["all", "nearest", "fast"] as FilterType[]).map((f) => (
+              <div className="flex gap-2 flex-wrap">
+                {([
+                  { id: "all", label: "Все" },
+                  { id: "nearest", label: "⚡ Ближние" },
+                  { id: "fast", label: "🚀 Быстрые" },
+                  { id: "custom", label: `🔧 Мои${customServers.length > 0 ? ` (${customServers.length})` : ""}` },
+                ] as { id: FilterType; label: string }[]).map((f) => (
                   <button
-                    key={f}
-                    onClick={() => setFilter(f)}
+                    key={f.id}
+                    onClick={() => setFilter(f.id)}
                     className="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all duration-200"
                     style={{
-                      background: filter === f ? "var(--cloud-cyan)" : "var(--cloud-surface2)",
-                      color: filter === f ? "#000" : "#6b7280",
-                      border: `1px solid ${filter === f ? "var(--cloud-cyan)" : "rgba(255,255,255,0.05)"}`,
-                      boxShadow: filter === f ? "0 0 16px rgba(0,229,255,0.25)" : "none",
+                      background: filter === f.id
+                        ? f.id === "custom" ? "var(--cloud-violet)" : "var(--cloud-cyan)"
+                        : "var(--cloud-surface2)",
+                      color: filter === f.id ? "#fff" : "#6b7280",
+                      border: `1px solid ${filter === f.id ? (f.id === "custom" ? "var(--cloud-violet)" : "var(--cloud-cyan)") : "rgba(255,255,255,0.05)"}`,
+                      boxShadow: filter === f.id ? `0 0 16px ${f.id === "custom" ? "rgba(139,92,246,0.3)" : "rgba(0,229,255,0.25)"}` : "none",
                     }}
                   >
-                    {f === "all" ? "Все" : f === "nearest" ? "⚡ Ближние" : "🚀 Быстрые"}
+                    {f.label}
                   </button>
                 ))}
               </div>
 
               {/* Servers */}
               <div className="space-y-2">
-                {filteredServers.length === 0 && (
+                {filteredServers.length === 0 && filter === "custom" && (
+                  <div
+                    className="rounded-2xl p-8 flex flex-col items-center gap-3 cursor-pointer"
+                    style={{ background: "var(--cloud-surface)", border: "1px dashed rgba(139,92,246,0.3)" }}
+                    onClick={() => { setShowAddModal(true); setAddError(""); setAddUrl(""); setAddName(""); }}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                      style={{ background: "rgba(139,92,246,0.12)" }}
+                    >
+                      <Icon name="Plus" size={22} style={{ color: "var(--cloud-violet)" }} />
+                    </div>
+                    <div className="text-center">
+                      <div className="text-sm font-semibold text-gray-300">Нет пользовательских серверов</div>
+                      <div className="text-xs text-gray-500 mt-0.5">Нажмите, чтобы добавить через URL</div>
+                    </div>
+                  </div>
+                )}
+                {filteredServers.length === 0 && filter !== "custom" && (
                   <div className="text-center py-10 text-gray-500">
                     <Icon name="ServerOff" size={32} className="mx-auto mb-2 opacity-30" />
                     <p className="text-sm">Нет серверов по фильтру</p>
@@ -541,7 +785,7 @@ export default function Index() {
                     className="server-card rounded-2xl p-4 cursor-pointer"
                     style={{
                       background: activeServer.id === server.id ? "rgba(0,229,255,0.07)" : "var(--cloud-surface)",
-                      border: `1px solid ${activeServer.id === server.id ? "rgba(0,229,255,0.22)" : "var(--cloud-border)"}`,
+                      border: `1px solid ${activeServer.id === server.id ? "rgba(0,229,255,0.22)" : server.custom ? "rgba(139,92,246,0.15)" : "var(--cloud-border)"}`,
                       animation: `slide-up 0.4s ease-out ${i * 0.05}s both`,
                     }}
                     onClick={() => { setActiveServer(server); setTab("home"); }}
@@ -557,6 +801,14 @@ export default function Index() {
                               style={{ background: "rgba(0,229,255,0.12)", color: "var(--cloud-cyan)" }}
                             >
                               Текущий
+                            </span>
+                          )}
+                          {server.custom && (
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded-md font-bold"
+                              style={{ background: "rgba(139,92,246,0.12)", color: "var(--cloud-violet)" }}
+                            >
+                              Мой
                             </span>
                           )}
                         </div>
@@ -607,6 +859,19 @@ export default function Index() {
                             />
                           ))}
                         </div>
+                        {server.custom && (
+                          <button
+                            className="mt-1 w-6 h-6 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-red-500/20"
+                            style={{ color: "rgba(244,63,135,0.5)" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCustomServers((prev) => prev.filter((s) => s.id !== server.id));
+                              if (activeServer.id === server.id) setActiveServer(SERVERS[0]);
+                            }}
+                          >
+                            <Icon name="Trash2" size={12} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
